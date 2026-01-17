@@ -17,7 +17,11 @@ class FrostedGlassView @JvmOverloads constructor(
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG) // 边框画笔
     private val refreshPaint = Paint(Paint.ANTI_ALIAS_FLAG) // 刷新效果画笔
     private val borderWidth = 4f // 边框宽度
-    private val cornerRadius = 16f // 圆角半径
+    // 圆角半径 (默认16f)
+    private var topLeftRadius = 16f
+    private var topRightRadius = 16f
+    private var bottomLeftRadius = 16f
+    private var bottomRightRadius = 16f
     private var animator: ValueAnimator? = null // 边框动画
     private var refreshAnimator: ValueAnimator? = null // 刷新效果动画
     private var progress = 0f // 边框动画进度
@@ -25,6 +29,26 @@ class FrostedGlassView @JvmOverloads constructor(
     private var isInitialized = false // 初始化状态
 
     init {
+        // 从XML布局中读取自定义属性
+        if (attrs != null) {
+            val typedArray = context.obtainStyledAttributes(attrs, R.styleable.FrostedGlassView)
+            try {
+                // 读取圆角半径属性，如果未设置则使用默认值
+                val defaultRadius = 16f
+                topLeftRadius = typedArray.getDimension(R.styleable.FrostedGlassView_topLeftRadius, defaultRadius)
+                topRightRadius = typedArray.getDimension(R.styleable.FrostedGlassView_topRightRadius, defaultRadius)
+                bottomLeftRadius = typedArray.getDimension(R.styleable.FrostedGlassView_bottomLeftRadius, defaultRadius)
+                bottomRightRadius = typedArray.getDimension(R.styleable.FrostedGlassView_bottomRightRadius, defaultRadius)
+                // 保持向后兼容：如果设置了cornerRadius，则使用它
+                val cornerRadius = typedArray.getDimension(R.styleable.FrostedGlassView_cornerRadius, -1f)
+                if (cornerRadius >= 0) {
+                    setCornerRadius(cornerRadius)
+                }
+            } finally {
+                typedArray.recycle()
+            }
+        }
+        
         setupPaints()
         viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
@@ -37,6 +61,89 @@ class FrostedGlassView @JvmOverloads constructor(
                 viewTreeObserver.removeOnGlobalLayoutListener(this)
             }
         })
+    }
+    
+    /**
+     * 设置单个角的圆角半径
+     * @param topLeft 左上角圆角半径
+     * @param topRight 右上角圆角半径
+     * @param bottomLeft 左下角圆角半径
+     * @param bottomRight 右下角圆角半径
+     */
+    fun setCornerRadii(topLeft: Float, topRight: Float, bottomLeft: Float, bottomRight: Float) {
+        this.topLeftRadius = topLeft
+        this.topRightRadius = topRight
+        this.bottomLeftRadius = bottomLeft
+        this.bottomRightRadius = bottomRight
+        invalidate() // 触发重绘以应用新的圆角半径
+    }
+    
+    /**
+     * 设置左上角圆角半径
+     * @param radius 圆角半径值
+     */
+    fun setTopLeftRadius(radius: Float) {
+        this.topLeftRadius = radius
+        invalidate()
+    }
+    
+    /**
+     * 设置右上角圆角半径
+     * @param radius 圆角半径值
+     */
+    fun setTopRightRadius(radius: Float) {
+        this.topRightRadius = radius
+        invalidate()
+    }
+    
+    /**
+     * 设置左下角圆角半径
+     * @param radius 圆角半径值
+     */
+    fun setBottomLeftRadius(radius: Float) {
+        this.bottomLeftRadius = radius
+        invalidate()
+    }
+    
+    /**
+     * 设置右下角圆角半径
+     * @param radius 圆角半径值
+     */
+    fun setBottomRightRadius(radius: Float) {
+        this.bottomRightRadius = radius
+        invalidate()
+    }
+    
+    /**
+     * 获取左上角圆角半径
+     * @return 左上角圆角半径值
+     */
+    fun getTopLeftRadius(): Float {
+        return topLeftRadius
+    }
+    
+    /**
+     * 获取右上角圆角半径
+     * @return 右上角圆角半径值
+     */
+    fun getTopRightRadius(): Float {
+        return topRightRadius
+    }
+    
+    /**
+     * 获取左下角圆角半径
+     * @return 左下角圆角半径值
+     */
+    fun getBottomLeftRadius(): Float {
+        return bottomLeftRadius
+    }
+    
+    /**
+     * 获取右下角圆角半径
+     * @return 右下角圆角半径值
+     */
+    fun getBottomRightRadius(): Float {
+        return bottomRightRadius
     }
 
     private fun setupPaints() {
@@ -88,7 +195,7 @@ class FrostedGlassView @JvmOverloads constructor(
             
             override fun onAnimationEnd(animation: android.animation.Animator) {
                 // 5秒后安排下一次刷新
-                postDelayed({ setupRefreshAnimation() }, 5000)
+                postDelayed({ setupRefreshAnimation() }, 0)
             }
             
             override fun onAnimationCancel(animation: android.animation.Animator) {}
@@ -102,10 +209,21 @@ class FrostedGlassView @JvmOverloads constructor(
         // 绘制10%黑色透明背景
         val backgroundPaint = Paint()
         backgroundPaint.color = Color.argb(25, 0, 0, 0) // 10%黑色透明度
-        canvas.drawRoundRect(
-            borderWidth, borderWidth, width - borderWidth, height - borderWidth,
-            cornerRadius, cornerRadius, backgroundPaint
+        
+        // 使用Path绘制带不同圆角半径的背景
+        val backgroundPath = Path()
+        val radii = floatArrayOf(
+            topLeftRadius, topLeftRadius,
+            topRightRadius, topRightRadius,
+            bottomRightRadius, bottomRightRadius,
+            bottomLeftRadius, bottomLeftRadius
         )
+        backgroundPath.addRoundRect(
+            borderWidth, borderWidth, width - borderWidth, height - borderWidth,
+            radii,
+            Path.Direction.CW
+        )
+        canvas.drawPath(backgroundPath, backgroundPaint)
 
         // 绘制动态流光边框
         drawFlowingBorder(canvas)
@@ -123,23 +241,46 @@ class FrostedGlassView @JvmOverloads constructor(
         // 计算对角线长度 (sqrt(width² + height²))
         val diagonalLength = Math.sqrt((width * width + height * height).toDouble()).toFloat()
         
+        // 计算刷新效果的宽度（1/6对角线长度，更窄）
+        val refreshWidth = diagonalLength / 6
+        
         // 根据refreshProgress计算位置
-        // 从左上角之前开始，到右下角之后结束
-        val startOffset = -diagonalLength
-        val endOffset = diagonalLength
-        val currentOffset = startOffset + refreshProgress * (endOffset - startOffset)
+        val progress = refreshProgress
         
-        // 计算刷新效果的宽度（1/4对角线长度）
-        val refreshWidth = diagonalLength / 4
+        // 先设置裁剪路径，确保刷新效果在圆角矩形内
+        val clipPath = Path()
+        val radii = floatArrayOf(
+            topLeftRadius, topLeftRadius,
+            topRightRadius, topRightRadius,
+            bottomRightRadius, bottomRightRadius,
+            bottomLeftRadius, bottomLeftRadius
+        )
+        clipPath.addRoundRect(
+            borderWidth, borderWidth, width - borderWidth, height - borderWidth,
+            radii,
+            Path.Direction.CW
+        )
+        canvas.clipPath(clipPath)
         
-        // 创建刷新效果的线性渐变
-        // 使用更窄的渐变以创建1/4宽度的效果
+        // 计算当前位置：从左上角外到右下角外
+        val startX = -refreshWidth
+        val startY = -refreshWidth
+        val endX = width + refreshWidth
+        val endY = height + refreshWidth
+        
+        // 计算当前点
+        val currentX = startX + (endX - startX) * progress
+        val currentY = startY + (endY - startY) * progress
+        
+        // 创建线性渐变，方向为左上角到右下角的斜角
         val gradient = LinearGradient(
-            currentOffset - refreshWidth, currentOffset - refreshWidth,
-            currentOffset + refreshWidth, currentOffset + refreshWidth,
+            currentX - refreshWidth,
+            currentY - refreshWidth,
+            currentX + refreshWidth,
+            currentY + refreshWidth,
             intArrayOf(
                 Color.TRANSPARENT,
-                Color.argb(128, 255, 255, 255), // 50%透明白色
+                Color.argb(32, 255, 255, 255), // 12.5%透明白色，更透明
                 Color.TRANSPARENT
             ),
             floatArrayOf(
@@ -152,39 +293,35 @@ class FrostedGlassView @JvmOverloads constructor(
         
         refreshPaint.shader = gradient
         
-        // 创建刷新效果路径
-        val refreshPath = Path()
-        
-        // 创建覆盖整个视图的矩形
-        refreshPath.addRect(
-            borderWidth, borderWidth, 
-            width - borderWidth, height - borderWidth,
-            Path.Direction.CW
+        // 绘制刷新效果，覆盖整个视图
+        canvas.drawRect(
+            0f, 0f,
+            width, height,
+            refreshPaint
         )
-        
-        // 裁剪到圆角矩形，保持边界
-        val clipPath = Path()
-        clipPath.addRoundRect(
-            borderWidth, borderWidth, width - borderWidth, height - borderWidth,
-            cornerRadius, cornerRadius,
-            Path.Direction.CW
-        )
-        canvas.clipPath(clipPath)
-        
-        // 绘制刷新效果
-        canvas.drawPath(refreshPath, refreshPaint)
     }
 
     private fun drawFlowingBorder(canvas: Canvas) {
         val width = width.toFloat()
         val height = height.toFloat()
         
+        // 定义圆角半径数组
+        val radii = floatArrayOf(
+            topLeftRadius, topLeftRadius,
+            topRightRadius, topRightRadius,
+            bottomRightRadius, bottomRightRadius,
+            bottomLeftRadius, bottomLeftRadius
+        )
+        
         // 首先绘制默认边框（10%透明白色）
         // 这提供了基础边框
-        canvas.drawRoundRect(
+        val borderPath = Path()
+        borderPath.addRoundRect(
             borderWidth, borderWidth, width - borderWidth, height - borderWidth,
-            cornerRadius, cornerRadius, borderPaint
+            radii,
+            Path.Direction.CW
         )
+        canvas.drawPath(borderPath, borderPaint)
         
         // 为流光效果创建更强烈的渐变
         // 这会使光效更明显
@@ -204,13 +341,7 @@ class FrostedGlassView @JvmOverloads constructor(
             Shader.TileMode.CLAMP
         )
 
-        // 计算边框路径
-        val borderPath = Path()
-        borderPath.addRoundRect(
-            borderWidth, borderWidth, width - borderWidth, height - borderWidth,
-            cornerRadius, cornerRadius,
-            Path.Direction.CW
-        )
+        // 计算边框路径（已在上面创建）
 
         // 创建渐变变换矩阵
         val matrix = Matrix()
@@ -264,5 +395,25 @@ class FrostedGlassView @JvmOverloads constructor(
         super.onDetachedFromWindow()
         animator?.cancel()
         refreshAnimator?.cancel()
+    }
+    
+    /**
+     * 设置所有角的圆角半径（保持向后兼容）
+     * @param radius 圆角半径值
+     */
+    fun setCornerRadius(radius: Float) {
+        topLeftRadius = radius
+        topRightRadius = radius
+        bottomLeftRadius = radius
+        bottomRightRadius = radius
+        invalidate() // 触发重绘以应用新的圆角半径
+    }
+    
+    /**
+     * 获取当前圆角半径（保持向后兼容）
+     * @return 当前圆角半径值
+     */
+    fun getCornerRadius(): Float {
+        return topLeftRadius // 返回左上角的圆角半径作为默认值
     }
 }

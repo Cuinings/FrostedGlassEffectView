@@ -7,13 +7,15 @@
     android:layout_height="match_parent"
     tools:context=".MainActivity">
 
+    <!-- FrostedGlassView with custom corner radius -->
     <com.cn.frosted.glass.frostedglasseffect.view.FrostedGlassView
         android:id="@+id/frostedGlassView"
-        android:layout_width="300dp"
+        android:layout_width="200dp"
         android:layout_height="200dp"
+        app:cornerRadius="24dp"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/frostedGlassView1"
         app:layout_constraintBottom_toBottomOf="parent">
         
         <TextView
@@ -25,5 +27,15 @@
             android:layout_gravity="center" />
             
     </com.cn.frosted.glass.frostedglasseffect.view.FrostedGlassView>
+
+    <com.cn.frosted.glass.frostedglasseffect.view.FrostedGlassView
+        android:id="@+id/frostedGlassView1"
+        android:layout_width="500dp"
+        android:layout_height="200dp"
+        app:cornerRadius="24dp"
+        app:layout_constraintStart_toEndOf="@id/frostedGlassView"
+        app:layout_constraintTop_toTopOf="@+id/frostedGlassView"
+        app:layout_constraintEnd_toEndOf="parent"/>
+
 
 </androidx.constraintlayout.widget.ConstraintLayout>
