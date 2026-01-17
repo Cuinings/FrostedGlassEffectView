@@ -16,6 +16,7 @@ class FrostedGlassView @JvmOverloads constructor(
 
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG) // 边框画笔
     private val refreshPaint = Paint(Paint.ANTI_ALIAS_FLAG) // 刷新效果画笔
+    private val backgroundPaint = Paint() // 背景画笔（复用）
     private val borderWidth = 4f // 边框宽度
     // 圆角半径 (默认16f)
     private var topLeftRadius = 16f
@@ -27,6 +28,16 @@ class FrostedGlassView @JvmOverloads constructor(
     private var progress = 0f // 边框动画进度
     private var refreshProgress = 0f // 刷新效果动画进度
     private var isInitialized = false // 初始化状态
+    
+    // 缓存对象，避免频繁创建
+    private val backgroundPath = Path()
+    private val borderPath = Path()
+    private val clipPath = Path()
+    private val radii = FloatArray(8) // 圆角半径数组
+    private val matrix = Matrix() // 矩阵对象（复用）
+    private var diagonalLength = 0f // 对角线长度（缓存）
+    private var refreshWidth = 0f // 刷新效果宽度（缓存）
+    private var radius = 0f // 用于流光效果的半径（缓存）
 
     init {
         // 从XML布局中读取自定义属性
@@ -155,6 +166,9 @@ class FrostedGlassView @JvmOverloads constructor(
         // 设置刷新效果画笔
         refreshPaint.style = Paint.Style.FILL
         refreshPaint.strokeWidth = 2f
+        
+        // 初始化背景画笔
+        backgroundPaint.color = Color.argb(25, 0, 0, 0) // 10%黑色透明度
     }
 
     private fun setupBlurEffect() {
@@ -206,18 +220,12 @@ class FrostedGlassView @JvmOverloads constructor(
     }
 
     override fun dispatchDraw(canvas: Canvas) {
-        // 绘制10%黑色透明背景
-        val backgroundPaint = Paint()
-        backgroundPaint.color = Color.argb(25, 0, 0, 0) // 10%黑色透明度
+        // 更新缓存的圆角半径数组
+        updateRadiiArray()
         
-        // 使用Path绘制带不同圆角半径的背景
-        val backgroundPath = Path()
-        val radii = floatArrayOf(
-            topLeftRadius, topLeftRadius,
-            topRightRadius, topRightRadius,
-            bottomRightRadius, bottomRightRadius,
-            bottomLeftRadius, bottomLeftRadius
-        )
+        // 绘制10%黑色透明背景
+        // 使用缓存的Path对象
+        backgroundPath.reset()
         backgroundPath.addRoundRect(
             borderWidth, borderWidth, width - borderWidth, height - borderWidth,
             radii,
@@ -234,27 +242,35 @@ class FrostedGlassView @JvmOverloads constructor(
         super.dispatchDraw(canvas)
     }
     
+    /**
+     * 更新圆角半径数组
+     */
+    private fun updateRadiiArray() {
+        radii[0] = topLeftRadius
+        radii[1] = topLeftRadius
+        radii[2] = topRightRadius
+        radii[3] = topRightRadius
+        radii[4] = bottomRightRadius
+        radii[5] = bottomRightRadius
+        radii[6] = bottomLeftRadius
+        radii[7] = bottomLeftRadius
+    }
+    
     private fun drawRefreshEffect(canvas: Canvas) {
         val width = width.toFloat()
         val height = height.toFloat()
         
-        // 计算对角线长度 (sqrt(width² + height²))
-        val diagonalLength = Math.sqrt((width * width + height * height).toDouble()).toFloat()
-        
-        // 计算刷新效果的宽度（1/6对角线长度，更窄）
-        val refreshWidth = diagonalLength / 6
+        // 缓存对角线长度和刷新宽度计算
+        if (diagonalLength == 0f || refreshWidth == 0f) {
+            diagonalLength = Math.sqrt((width * width + height * height).toDouble()).toFloat()
+            refreshWidth = diagonalLength / 6
+        }
         
         // 根据refreshProgress计算位置
         val progress = refreshProgress
         
         // 先设置裁剪路径，确保刷新效果在圆角矩形内
-        val clipPath = Path()
-        val radii = floatArrayOf(
-            topLeftRadius, topLeftRadius,
-            topRightRadius, topRightRadius,
-            bottomRightRadius, bottomRightRadius,
-            bottomLeftRadius, bottomLeftRadius
-        )
+        clipPath.reset()
         clipPath.addRoundRect(
             borderWidth, borderWidth, width - borderWidth, height - borderWidth,
             radii,
@@ -305,17 +321,9 @@ class FrostedGlassView @JvmOverloads constructor(
         val width = width.toFloat()
         val height = height.toFloat()
         
-        // 定义圆角半径数组
-        val radii = floatArrayOf(
-            topLeftRadius, topLeftRadius,
-            topRightRadius, topRightRadius,
-            bottomRightRadius, bottomRightRadius,
-            bottomLeftRadius, bottomLeftRadius
-        )
-        
         // 首先绘制默认边框（10%透明白色）
         // 这提供了基础边框
-        val borderPath = Path()
+        borderPath.reset()
         borderPath.addRoundRect(
             borderWidth, borderWidth, width - borderWidth, height - borderWidth,
             radii,
@@ -341,19 +349,20 @@ class FrostedGlassView @JvmOverloads constructor(
             Shader.TileMode.CLAMP
         )
 
-        // 计算边框路径（已在上面创建）
-
-        // 创建渐变变换矩阵
-        val matrix = Matrix()
+        // 缓存半径计算，避免每次重绘都计算
+        if (radius == 0f) {
+            radius = Math.sqrt((width/2).toDouble() * (width/2).toDouble() + (height/2).toDouble() * (height/2).toDouble()).toFloat()
+        }
         
         // 根据进度计算位置
         val angle = progress * 360
-        val radius = Math.sqrt((width/2).toDouble() * (width/2).toDouble() + (height/2).toDouble() * (height/2).toDouble()).toFloat()
         
         // 根据角度计算偏移
         val offsetX = (Math.cos(Math.toRadians(angle.toDouble())) * radius).toFloat()
         val offsetY = (Math.sin(Math.toRadians(angle.toDouble())) * radius).toFloat()
         
+        // 使用缓存的矩阵对象
+        matrix.reset()
         // 平移渐变以创建流动效果
         matrix.setTranslate(offsetX + width/2, offsetY + height/2)
         
@@ -380,6 +389,13 @@ class FrostedGlassView @JvmOverloads constructor(
             val childLeft = (width - childWidth) / 2
             val childTop = (height - childHeight) / 2
             child.layout(childLeft, childTop, childLeft + childWidth, childTop + childHeight)
+        }
+        
+        // 当视图尺寸改变时，重置缓存的计算值
+        if (changed) {
+            diagonalLength = 0f
+            refreshWidth = 0f
+            radius = 0f
         }
     }
 
