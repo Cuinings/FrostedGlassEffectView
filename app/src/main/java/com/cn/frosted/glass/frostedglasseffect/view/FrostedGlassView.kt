@@ -7,9 +7,11 @@ import android.view.*
 import android.animation.ValueAnimator
 import android.view.animation.LinearInterpolator
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.core.view.ViewCompat
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.min
 
 class FrostedGlassView @JvmOverloads constructor(
     context: Context,
@@ -20,6 +22,7 @@ class FrostedGlassView @JvmOverloads constructor(
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG) // 边框画笔
     private val refreshPaint = Paint(Paint.ANTI_ALIAS_FLAG) // 刷新效果画笔
     private val backgroundPaint = Paint() // 背景画笔（复用）
+    private val lightPaint = Paint(Paint.ANTI_ALIAS_FLAG) // 流光效果画笔（复用）
     private val borderWidth = 4f // 边框宽度
     // 圆角半径 (默认16f)
     private var topLeftRadius = 16f
@@ -41,8 +44,26 @@ class FrostedGlassView @JvmOverloads constructor(
     private var diagonalLength = 0f // 对角线长度（缓存）
     private var refreshWidth = 0f // 刷新效果宽度（缓存）
     private var radius = 0f // 用于流光效果的半径（缓存）
+    // 缓存渐变对象
+    private var borderGradient: LinearGradient? = null
+    private var refreshGradient: LinearGradient? = null
+    // 缓存计算值
+    private var cachedWidth = 0f
+    private var cachedHeight = 0f
+    // 刷新效果矩阵
+    private val refreshMatrix = Matrix() // 矩阵对象（复用）
+    // 缓存的矩形对象
+    private val refreshAreaRect = RectF() // 刷新区域矩形（复用）
+    private val viewAreaRect = RectF() // 视图区域矩形（复用）
+    // 圆角半径变化标志
+    private var radiiChanged = true
 
     init {
+        // 启用硬件加速（如果可用）
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.HONEYCOMB) {
+//            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        }
+        
         // 从XML布局中读取自定义属性
         if (attrs != null) {
             val typedArray = context.obtainStyledAttributes(attrs, R.styleable.FrostedGlassView)
@@ -89,7 +110,7 @@ class FrostedGlassView @JvmOverloads constructor(
         this.topRightRadius = topRight
         this.bottomLeftRadius = bottomLeft
         this.bottomRightRadius = bottomRight
-        invalidate() // 触发重绘以应用新的圆角半径
+        markRadiiChanged()
     }
     
     /**
@@ -98,7 +119,7 @@ class FrostedGlassView @JvmOverloads constructor(
      */
     fun setTopLeftRadius(radius: Float) {
         this.topLeftRadius = radius
-        invalidate()
+        markRadiiChanged()
     }
     
     /**
@@ -107,7 +128,7 @@ class FrostedGlassView @JvmOverloads constructor(
      */
     fun setTopRightRadius(radius: Float) {
         this.topRightRadius = radius
-        invalidate()
+        markRadiiChanged()
     }
     
     /**
@@ -116,7 +137,7 @@ class FrostedGlassView @JvmOverloads constructor(
      */
     fun setBottomLeftRadius(radius: Float) {
         this.bottomLeftRadius = radius
-        invalidate()
+        markRadiiChanged()
     }
     
     /**
@@ -125,7 +146,15 @@ class FrostedGlassView @JvmOverloads constructor(
      */
     fun setBottomRightRadius(radius: Float) {
         this.bottomRightRadius = radius
-        invalidate()
+        markRadiiChanged()
+    }
+    
+    /**
+     * 标记圆角半径已更改，并触发重绘
+     */
+    private fun markRadiiChanged() {
+        radiiChanged = true
+        invalidate() // 触发重绘以应用新的圆角半径
     }
     
     /**
@@ -172,6 +201,10 @@ class FrostedGlassView @JvmOverloads constructor(
         
         // 初始化背景画笔
         backgroundPaint.color = Color.argb(25, 0, 0, 0) // 10%黑色透明度
+        
+        // 初始化流光效果画笔
+        lightPaint.style = Paint.Style.STROKE
+        lightPaint.strokeWidth = borderWidth
     }
 
     private fun setupBlurEffect() {
@@ -188,31 +221,58 @@ class FrostedGlassView @JvmOverloads constructor(
     private fun setupBorderAnimation() {
         // 边框动画（流光效果）
         animator = ValueAnimator.ofFloat(0f, 1f)
-        animator?.duration = 5000
-        animator?.repeatCount = ValueAnimator.INFINITE
+        animator?.duration = 5000 // 恢复到原始持续时间
+        animator?.repeatCount = ValueAnimator.INFINITE // 无限循环
+        animator?.repeatMode = ValueAnimator.RESTART // 确保动画重复时正确重置
         animator?.interpolator = LinearInterpolator()
         animator?.addUpdateListener {
-            progress = it.animatedValue as Float
-            invalidate()
+            val newProgress = it.animatedValue as Float
+            progress = newProgress
+            // 使用postInvalidateOnAnimation()代替invalidate()，提高动画流畅度
+            ViewCompat.postInvalidateOnAnimation(this)
         }
+        // 添加重复监听器，确保动画重复时也触发重绘
+        animator?.addListener(object : android.animation.Animator.AnimatorListener {
+            override fun onAnimationStart(animation: android.animation.Animator) {}
+            
+            override fun onAnimationEnd(animation: android.animation.Animator) {}
+            
+            override fun onAnimationCancel(animation: android.animation.Animator) {}
+            
+            override fun onAnimationRepeat(animation: android.animation.Animator) {
+                // 动画重复时触发重绘，确保流光效果持续可见
+                ViewCompat.postInvalidateOnAnimation(this@FrostedGlassView)
+            }
+        })
         animator?.start()
     }
     
     private fun setupRefreshAnimation() {
         refreshAnimator = ValueAnimator.ofFloat(0f, 1f)
-        refreshAnimator?.duration = 5000
+        refreshAnimator?.duration = 1000 // 缩短刷新动画持续时间，使其更流畅
         refreshAnimator?.repeatCount = 0 // 不无限重复
         refreshAnimator?.interpolator = LinearInterpolator()
+        // 优化：设置动画更新监听器，减少不必要的更新
         refreshAnimator?.addUpdateListener {
-            refreshProgress = it.animatedValue as Float
-            invalidate()
+            val newProgress = it.animatedValue as Float
+            // 只有当进度变化超过一定阈值时才触发重绘
+            if (Math.abs(newProgress - refreshProgress) > 0.02f) {
+                refreshProgress = newProgress
+                // 使用postInvalidateOnAnimation()代替invalidate()，提高动画流畅度
+                ViewCompat.postInvalidateOnAnimation(this)
+            }
         }
         refreshAnimator?.addListener(object : android.animation.Animator.AnimatorListener {
             override fun onAnimationStart(animation: android.animation.Animator) {}
             
             override fun onAnimationEnd(animation: android.animation.Animator) {
-                // 5秒后安排下一次刷新
-                postDelayed({ setupRefreshAnimation() }, 0)
+                // 延迟5秒后重新启动动画，确保无缝衔接
+                // 使用postDelayed()确保在UI线程中执行，消除动画间隙
+                postDelayed({
+                    // 重置refreshProgress为0，确保动画从开始位置重新开始
+                    refreshProgress = 0f
+                    setupRefreshAnimation()
+                }, 5000) // 5秒延迟
             }
             
             override fun onAnimationCancel(animation: android.animation.Animator) {}
@@ -223,8 +283,10 @@ class FrostedGlassView @JvmOverloads constructor(
     }
 
     override fun dispatchDraw(canvas: Canvas) {
-        // 更新缓存的圆角半径数组
-        updateRadiiArray()
+        // 只有在圆角半径变化时才更新缓存的圆角半径数组
+        if (radiiChanged) {
+            updateRadiiArray()
+        }
         
         // 绘制10%黑色透明背景
         // 使用缓存的Path对象
@@ -257,6 +319,7 @@ class FrostedGlassView @JvmOverloads constructor(
         radii[5] = bottomRightRadius
         radii[6] = bottomLeftRadius
         radii[7] = bottomLeftRadius
+        radiiChanged = false
     }
     
     private fun drawRefreshEffect(canvas: Canvas) {
@@ -272,15 +335,6 @@ class FrostedGlassView @JvmOverloads constructor(
         // 根据refreshProgress计算位置
         val progress = refreshProgress
         
-        // 先设置裁剪路径，确保刷新效果在圆角矩形内
-        clipPath.reset()
-        clipPath.addRoundRect(
-            borderWidth, borderWidth, width - borderWidth, height - borderWidth,
-            radii,
-            Path.Direction.CW
-        )
-        canvas.clipPath(clipPath)
-        
         // 计算当前位置：从左上角外到右下角外
         val startX = -refreshWidth
         val startY = -refreshWidth
@@ -291,28 +345,66 @@ class FrostedGlassView @JvmOverloads constructor(
         val currentX = startX + (endX - startX) * progress
         val currentY = startY + (endY - startY) * progress
         
-        // 创建线性渐变，方向为左上角到右下角的斜角
-        val gradient = LinearGradient(
+        // 只在尺寸变化时创建新的渐变对象
+        if (refreshGradient == null || cachedWidth != width || cachedHeight != height) {
+            refreshGradient = LinearGradient(
+                -refreshWidth,
+                -refreshWidth,
+                refreshWidth,
+                refreshWidth,
+                intArrayOf(
+                    Color.TRANSPARENT,
+                    Color.argb(100, 255, 255, 255), // 透明白色，更透明
+                    Color.TRANSPARENT
+                ),
+                floatArrayOf(
+                    0f,
+                    0.5f,
+                    1f
+                ),
+                Shader.TileMode.CLAMP
+            )
+        }
+        
+        // 使用矩阵变换来调整渐变位置
+        refreshMatrix.reset()
+        refreshMatrix.setTranslate(currentX, currentY)
+        refreshGradient?.setLocalMatrix(refreshMatrix)
+        
+        refreshPaint.shader = refreshGradient
+        
+        // 只在刷新效果接近边缘时使用裁剪路径
+        // 这样可以减少昂贵的裁剪操作次数
+        // 使用缓存的矩形对象，避免每次都创建新对象
+        refreshAreaRect.set(
             currentX - refreshWidth,
             currentY - refreshWidth,
             currentX + refreshWidth,
-            currentY + refreshWidth,
-            intArrayOf(
-                Color.TRANSPARENT,
-                Color.argb(100, 255, 255, 255), // 透明白色，更透明
-                Color.TRANSPARENT
-            ),
-            floatArrayOf(
-                0f,
-                0.5f,
-                1f
-            ),
-            Shader.TileMode.CLAMP
+            currentY + refreshWidth
         )
         
-        refreshPaint.shader = gradient
+        viewAreaRect.set(
+            borderWidth,
+            borderWidth,
+            width - borderWidth,
+            height - borderWidth
+        )
         
-        // 绘制刷新效果，覆盖整个视图
+        // 检查刷新区域是否与圆角边缘相交
+        val intersectsWithEdges = !viewAreaRect.contains(refreshAreaRect)
+        
+        if (intersectsWithEdges) {
+            // 当刷新效果接近边缘时，使用裁剪路径确保效果在圆角内
+            clipPath.reset()
+            clipPath.addRoundRect(
+                borderWidth, borderWidth, width - borderWidth, height - borderWidth,
+                radii,
+                Path.Direction.CW
+            )
+            canvas.clipPath(clipPath)
+        }
+        
+        // 绘制刷新效果
         canvas.drawRect(
             0f, 0f,
             width, height,
@@ -335,22 +427,29 @@ class FrostedGlassView @JvmOverloads constructor(
         canvas.drawPath(borderPath, borderPaint)
         
         // 为流光效果创建更强烈的渐变
-        // 这会使光效更明显
-        val gradient = LinearGradient(
-            -width, -height,
-            0f, 0f,
-            intArrayOf(
-                Color.TRANSPARENT,
-                Color.WHITE, // 完全不透明的白色，确保最大可见度
-                Color.TRANSPARENT
-            ),
-            floatArrayOf(
-                0f,
-                0.5f,
-                1f
-            ),
-            Shader.TileMode.CLAMP
-        )
+        // 只在尺寸变化时创建新的渐变
+        if (borderGradient == null || cachedWidth != width || cachedHeight != height) {
+            // 增强起点高亮效果
+            borderGradient = LinearGradient(
+                -width, -height,
+                0f, 0f,
+                intArrayOf(
+                    Color.TRANSPARENT,
+                    Color.WHITE, // 完全不透明的白色，确保最大可见度
+                    Color.argb(200, 255, 255, 255), // 半透明白色，使起点更明显
+                    Color.TRANSPARENT
+                ),
+                floatArrayOf(
+                    0f,
+                    0.3f, // 调整渐变分布，使高亮区域更集中
+                    0.5f,
+                    1f
+                ),
+                Shader.TileMode.CLAMP
+            )
+            cachedWidth = width
+            cachedHeight = height
+        }
 
         // 缓存半径计算，避免每次重绘都计算
         if (radius == 0f) {
@@ -372,13 +471,10 @@ class FrostedGlassView @JvmOverloads constructor(
         // 旋转渐变以跟随边框
         matrix.postRotate(angle + 45, width/2, height/2)
         
-        gradient.setLocalMatrix(matrix)
+        borderGradient?.setLocalMatrix(matrix)
         
-        // 创建单独的画笔用于流光效果，确保它始终明亮
-        val lightPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-        lightPaint.style = Paint.Style.STROKE
-        lightPaint.strokeWidth = borderWidth
-        lightPaint.shader = gradient
+        // 复用缓存的lightPaint对象
+        lightPaint.shader = borderGradient
 
         // 在基础边框上绘制流光效果
         canvas.drawPath(borderPath, lightPaint)
@@ -399,6 +495,10 @@ class FrostedGlassView @JvmOverloads constructor(
             diagonalLength = 0f
             refreshWidth = 0f
             radius = 0f
+            borderGradient = null
+            refreshGradient = null
+            cachedWidth = 0f
+            cachedHeight = 0f
         }
     }
 
@@ -416,6 +516,11 @@ class FrostedGlassView @JvmOverloads constructor(
         refreshAnimator?.cancel()
     }
     
+    override fun setWillNotDraw(willNotDraw: Boolean) {
+        // 确保视图会被绘制，因为我们需要自定义绘制逻辑
+        super.setWillNotDraw(false)
+    }
+    
     /**
      * 设置所有角的圆角半径（保持向后兼容）
      * @param radius 圆角半径值
@@ -425,7 +530,7 @@ class FrostedGlassView @JvmOverloads constructor(
         topRightRadius = radius
         bottomLeftRadius = radius
         bottomRightRadius = radius
-        invalidate() // 触发重绘以应用新的圆角半径
+        markRadiiChanged()
     }
     
     /**
