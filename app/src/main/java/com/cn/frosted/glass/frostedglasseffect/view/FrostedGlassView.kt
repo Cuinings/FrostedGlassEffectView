@@ -7,6 +7,9 @@ import android.view.*
 import android.animation.ValueAnimator
 import android.view.animation.LinearInterpolator
 import androidx.constraintlayout.widget.ConstraintLayout
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 class FrostedGlassView @JvmOverloads constructor(
     context: Context,
@@ -262,7 +265,7 @@ class FrostedGlassView @JvmOverloads constructor(
         
         // 缓存对角线长度和刷新宽度计算
         if (diagonalLength == 0f || refreshWidth == 0f) {
-            diagonalLength = Math.sqrt((width * width + height * height).toDouble()).toFloat()
+            diagonalLength = sqrt((width * width + height * height).toDouble()).toFloat()
             refreshWidth = diagonalLength / 6
         }
         
@@ -296,7 +299,7 @@ class FrostedGlassView @JvmOverloads constructor(
             currentY + refreshWidth,
             intArrayOf(
                 Color.TRANSPARENT,
-                Color.argb(32, 255, 255, 255), // 12.5%透明白色，更透明
+                Color.argb(100, 255, 255, 255), // 透明白色，更透明
                 Color.TRANSPARENT
             ),
             floatArrayOf(
@@ -351,15 +354,15 @@ class FrostedGlassView @JvmOverloads constructor(
 
         // 缓存半径计算，避免每次重绘都计算
         if (radius == 0f) {
-            radius = Math.sqrt((width/2).toDouble() * (width/2).toDouble() + (height/2).toDouble() * (height/2).toDouble()).toFloat()
+            radius = sqrt((width / 2).toDouble() * (width / 2).toDouble() + (height / 2).toDouble() * (height / 2).toDouble()).toFloat()
         }
         
         // 根据进度计算位置
         val angle = progress * 360
         
         // 根据角度计算偏移
-        val offsetX = (Math.cos(Math.toRadians(angle.toDouble())) * radius).toFloat()
-        val offsetY = (Math.sin(Math.toRadians(angle.toDouble())) * radius).toFloat()
+        val offsetX = (cos(Math.toRadians(angle.toDouble())) * radius).toFloat()
+        val offsetY = (sin(Math.toRadians(angle.toDouble())) * radius).toFloat()
         
         // 使用缓存的矩阵对象
         matrix.reset()
